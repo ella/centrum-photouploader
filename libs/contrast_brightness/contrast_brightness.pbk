@@ -1,0 +1,62 @@
+<languageVersion : 1.0;>
+
+kernel ContrastBrightnessFilter
+<   namespace : "Your Namespace";
+    vendor : "Your Vendor";
+    version : 1;
+    description : "your description";
+>
+{
+    dependent float contrast_transform[256];
+    parameter float brightness
+    <
+        minValue:-1.0;
+        maxValue:1.0;
+        defaultValue:0.0;
+    >;
+    parameter float contrast
+    <
+        minValue:-0.5;
+        maxValue:1.5;
+        defaultValue:0.5;
+    >;
+    input image4 src;
+    output pixel4 dst;
+    
+    void evaluateDependents()
+    {
+        for(int i=0;i<256;i++)
+        {
+            if(float(i)<(128.0+128.0*tan(contrast))&&
+               float(i)>(128.0-128.0*tan(contrast)))
+                contrast_transform[i]=(float(i)-128.0)/tan(contrast)+128.0;
+            else
+            {
+                if(float(i)>=(128.0+128.0*tan(contrast)))
+                    contrast_transform[i]=255.0;
+                else
+                    contrast_transform[i]=0.0;
+            }
+        }
+
+    }
+
+    void
+    evaluatePixel()
+    {
+        pixel4 cur_color = sampleNearest(src,outCoord());
+        
+        int r = int(cur_color.r*255.0);
+        int g = int(cur_color.g*255.0);
+        int b = int(cur_color.b*255.0);
+        
+        float newr = contrast_transform[r];
+        float newg = contrast_transform[g];
+        float newb = contrast_transform[b];
+        
+        dst.rgb = float3(newr/255.0 + brightness,
+                         newg/255.0 + brightness,
+                         newb/255.0 + brightness);
+        dst.a = 1.0;
+    }
+}

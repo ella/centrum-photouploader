@@ -1,0 +1,701 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" 
+	layout="vertical" xmlns:ns="library:adobe/flashx/textLayout"
+	verticalGap="1" xmlns:tools="com.centrumholdings.photouploader.tools.*"
+	applicationComplete="onComplete()" frameRate="24"
+	xmlns:gui="com.centrumholdings.photouploader.gui.*">
+
+<mx:Style source="style.css"/>
+
+<mx:Script>
+	<![CDATA[
+		import mx.rpc.events.InvokeEvent;
+		import mx.rpc.events.FaultEvent;
+		import mx.rpc.events.ResultEvent;
+		import mx.rpc.http.HTTPService;
+		import mx.utils.ObjectUtil;
+		import mx.controls.ProgressBar;
+		import mx.utils.Base64Decoder;
+		import mx.utils.Base64Encoder;
+		import com.centrumholdings.graphics.BitmapEditor;
+		import hurlant.jpeg.as3_jpeg_wrapper;
+		import mx.graphics.codec.PNGEncoder;
+		import flash.utils.getTimer;
+		import com.centrumholdings.UploadPostHelper;
+		import mx.utils.URLUtil;
+		import mx.graphics.codec.JPEGEncoder;
+		import com.centrumholdings.photouploader.tools.ToolController;
+		import com.centrumholdings.photouploader.controllers.Browser;
+		import mx.events.NumericStepperEvent;
+		import mx.events.SliderEvent;
+		import mx.controls.Alert;
+		import com.centrumholdings.photouploader.controllers.ImageLoaderEvent;
+		import com.centrumholdings.photouploader.controllers.ImageLoaderEvent;
+		import com.centrumholdings.photouploader.controllers.ImageLoader;
+		
+		
+		
+		private var imageMaxWidth:Number = 4096;
+		private var imageMaxHeight:Number = 4095;
+		
+		private static const version:String = "Photo Uploader 30-06-2009 15:00";
+		
+		
+		private function onComplete():void{
+			stage.quality = StageQuality.BEST;
+			stage.addEventListener(FullScreenEvent.FULL_SCREEN, onFullscreen);
+			if (ExternalInterface.available){
+				ExternalInterface.addCallback("saveData", saveData);
+			}
+			var customItem:ContextMenuItem = new ContextMenuItem(version, true);
+			
+			var myContextMenu:ContextMenu = new ContextMenu();
+			myContextMenu.customItems.push(customItem);
+			myContextMenu.hideBuiltInItems();
+			contextMenu = myContextMenu;
+		}
+		
+		
+		
+		//--------------------------------------
+		// NAVIGATION
+		//--------------------------------------
+		private function editPhoto():void{
+			try{
+				stage.displayState = StageDisplayState.FULL_SCREEN;
+			}catch(err:Error){
+				Alert.show("Nastala chyba při přechodu do Fullscreenu.");
+			}
+		}
+		private function exit():void{
+			stage.displayState = StageDisplayState.NORMAL;
+		}
+		private function onFullscreen(evt:FullScreenEvent):void{
+			if (evt.fullScreen){
+				currentState = "editor";
+			}else{
+				currentState = "photoSelected";
+			}
+		}
+		
+		
+		
+		//--------------------------------------
+		// LOADING IMAGE
+		//--------------------------------------
+		[Bindable]
+		private var filename:String = "";
+		private var imageLoader:ImageLoader = new ImageLoader();
+		private function choosePhoto():void{
+			imageLoader.addEventListener(ImageLoaderEvent.IMAGE_SELECTED, onImageSelected);
+			imageLoader.addEventListener(ImageLoaderEvent.IMAGE_READY, onImageReady);
+			imageLoader.selectAndLocalImage();
+			if (compareBox){
+				compareBox.visible = false;
+			}
+		}
+		private function onImageSelected(evt:ImageLoaderEvent):void{
+			if (photoStage)
+				photoStage.removeBitmapData();
+		}
+		private function onImageReady(evt:ImageLoaderEvent):void{
+			imageLoader.removeEventListener(ImageLoaderEvent.IMAGE_READY, onImageReady);
+			if (currentState != "photoSelected"){
+				currentState = "photoSelected";
+			}else{
+				resetColorSetting();
+			}
+			filename = imageLoader.currentFilename;
+			photoStage.addBitmapData(evt.bitmapData);
+			photoStage.zoomFitToScreen();
+		}
+		
+		
+		
+		//--------------------------------------
+		// ZOOM
+		//--------------------------------------
+		private function onZoomComboBoxChange():void{
+			if (zoomCombo.selectedItem.value == 0){
+				photoStage.zoomFitToScreen();
+			}else{
+				photoStage.zoom = zoomCombo.selectedItem.value;
+			}
+		}
+		
+		
+		//--------------------------------------
+		// UNDO & REDO
+		//--------------------------------------
+		private function undo():void{
+			photoStage.toolController.undo();
+		}
+		private function redo():void{
+			photoStage.toolController.redo();
+		}
+		
+		
+		
+		
+		//--------------------------------------
+		// COLOR SETTING
+		//--------------------------------------
+		private function resetColorSetting():void{
+			if (brightnessSlider){
+				brightnessSlider.value = contrastSlider.value = colorSlider.value = 0;
+			}
+		}
+		private function updateColorSetting(event:NumericStepperEvent=null):void{
+			hideCompare();
+			if (event){
+				/* colorSlider.value = colorStepper.value;
+				contrastSlider.value = contrastStepper.value;
+				brightnessSlider.value = brightnessStepper.value; */
+				photoStage.toolController.setColorSetting(brightnessStepper.value, contrastStepper.value, colorStepper.value);
+			}else{
+				photoStage.toolController.setColorSetting(brightnessSlider.value, contrastSlider.value, colorSlider.value);
+			}
+			
+			if (photoStage.toolController.color != 0  ||  photoStage.toolController.contrast != 0  ||  photoStage.toolController.brightness  != 0){
+				compareBox.visible = true;
+			}else{
+				compareBox.visible = false;
+			}
+		}
+		
+		
+		//--------------------------------------
+		// COMPARE WITH ORIGINAL IMAGE   
+		//--------------------------------------
+		private function updateCompare():void{
+			const comparePadding:Number = 30;
+			
+			var maxW:Number = compareBox.width-2*comparePadding;
+			var percent:Number = Math.min(Math.max(compareBox.mouseX - comparePadding,0),maxW) / maxW * 100;
+			
+			photoStage.showCompare(percent);
+		}
+		private function hideCompare():void{
+			photoStage.hideCompare();
+			
+			var urlRequest:URLRequest = new URLRequest()
+			urlRequest.requestHeaders = [];
+		}
+		
+		
+		
+		
+		
+		
+		
+		//--------------------------------------
+		// COMMUNICATION WITH JAVASCRIPT   
+		//--------------------------------------
+		private var jpgEncoder:JPEGEncoder = new JPEGEncoder(85);
+		private var pngEncoder:PNGEncoder = new PNGEncoder();
+		private var startTime:Number;
+		private var saveDataParams:Object;
+		private var saveDataURL:String;
+		private var saveDataFormatConversion:Object = {
+			png : "png",
+			tiff : "jpg.90",
+			gif : "png",
+			jpg : "jpg.85"
+		}
+		
+		private function saveData(params:Object, options:Object):Number{
+			if (!options){
+				return 3;
+			}
+			if (!options.maxWidth){
+				options.maxWidth = NaN;
+			}
+			if (!options.maxHeight){
+				options.maxHeight = NaN;
+			}
+			if (!options.url){
+				return 4;
+			}
+			
+			saveDataParams = params;
+			saveDataURL = options.url;
+			if (options.hasOwnProperty("maxHeight")  &&  isNaN(options.maxHeight) == false){
+				imageMaxHeight = options.maxHeight;
+			}
+			if (options.hasOwnProperty("maxWidth")  &&  isNaN(options.maxWidth) == false){
+				imageMaxWidth = options.maxWidth;
+			}
+			if (options.formatConversion){
+				saveDataFormatConversion = options.formatConversion;
+			}
+			
+			
+			if (!filename  ||  filename.length < 3){
+				return 2;
+			}
+			
+			// no error:
+			currentState = "saveData";
+			return 0;
+		}
+		private function saveDataNow():void{
+			try{
+			currentState = "savingData";
+			if (savingStatus){
+				savingStatus.text = "STATUS: KONVERTUJI FOTOGRAFII";
+			}
+			startTime = getTimer();
+			
+			// RESIZE BITMAP
+			var resizedBmp:BitmapData = BitmapEditor.resizeBigImage(photoStage.getBitmapData(), imageMaxWidth, imageMaxHeight);
+			trace("time resize:" + (getTimer()-startTime) );
+			var selectedFace:Rectangle = photoStage.getSelectedFaceRect(imageMaxWidth, imageMaxHeight);
+			
+			// save important rectangle/face selection
+			if (selectedFace  &&  selectedFace.width > 10  &&  selectedFace.height > 10){
+				saveDataParams.important_left 	= Math.round(selectedFace.x);
+				saveDataParams.important_top 	= Math.round(selectedFace.y);
+				saveDataParams.important_right 	= Math.round(imageMaxWidth - selectedFace.right);
+				saveDataParams.important_bottom = Math.round(imageMaxHeight - selectedFace.bottom);
+			}else{
+				saveDataParams.important_left = 0;
+				saveDataParams.important_top = 0;
+				saveDataParams.important_right = 0;
+				saveDataParams.important_bottom = 0;
+			}
+			// path to file
+			saveDataParams.image = filename;
+			
+			// FILE TYPE
+			startTime = getTimer();
+			var newFileType:String;
+			switch(imageLoader.currentFiletype){
+				case "gif":
+					newFileType = saveDataFormatConversion.gif;
+					break;
+				case "png":
+					newFileType = saveDataFormatConversion.png;
+					break;
+				case "jpg":
+				case "jpeg":
+					newFileType = saveDataFormatConversion.jpg;
+					break;
+				case "tiff":
+				case "tif":
+					newFileType = saveDataFormatConversion.tiff;
+					break;
+				default:
+					newFileType = "jpg.85";
+					break;
+			}
+			
+			// ENCODING
+			var file:ByteArray;
+			if (newFileType == "png"){
+				// encode to png
+				trace("encode to png");
+				file = pngEncoder.encode(resizedBmp);
+			}else{
+				var jpgQuality:Number = newFileType.split(".")[1];
+				// encode to jpg
+				if (isNaN(jpgQuality)  ||  jpgQuality == 85){
+					jpgQuality = 85;
+				}else{
+					jpgEncoder = new JPEGEncoder(jpgQuality);
+				}
+				trace("encode to jpg  " + jpgQuality);
+				file = jpgEncoder.encode(resizedBmp);
+			}
+			// remove quality info
+			newFileType = newFileType.split(".")[0];
+			
+			
+			
+			
+			
+			
+			var request:URLRequest = new URLRequest(saveDataURL);
+			request.contentType = "multipart/form-data; boundary=" + UploadPostHelper.getBoundary();
+			request.method = URLRequestMethod.POST;
+			var newFilename:String = filename.split(".")[0] + "." + newFileType;
+			
+			request.data = UploadPostHelper.getPostData(newFilename, file, saveDataParams);
+			trace("file.length:" + file.length);
+			
+			
+			// send via URLLoader
+			saveDataURLLoader = new URLLoader();
+			//saveDataURLLoader.dataFormat = URLLoaderDataFormat.BINARY;
+			//saveDataURLLoader.dataFormat = URLLoaderDataFormat.TEXT;
+			//saveDataURLLoader.dataFormat = URLLoaderDataFormat.VARIABLES;
+			trace("data format = default");
+			
+			
+			savingStatus.text = "STATUS: ODESÍLÁM NA SERVER";
+			saveDataURLLoader.addEventListener(ProgressEvent.PROGRESS, 				onSaveDataProgress);
+			saveDataURLLoader.addEventListener(SecurityErrorEvent.SECURITY_ERROR,  	onSaveDataSecurityError);
+			saveDataURLLoader.addEventListener(IOErrorEvent.IO_ERROR, 				onSaveDataIOError);
+			saveDataURLLoader.addEventListener(HTTPStatusEvent.HTTP_STATUS, 		onSaveDataHTTPStatus);
+			saveDataURLLoader.addEventListener(Event.COMPLETE, 						onSaveDataComplete);
+			saveDataURLLoader.load(request);
+			trace("saveDataURLLoader.bytesTotal:" + saveDataURLLoader.bytesTotal);
+			
+			/**/
+			
+			}catch(err:Error){
+				throw new Error("neznama chyba:" + err.message);
+				trace("saveDataNow - ActionScript Error:" + err.message);
+				onSaveDataError("saveDataNow - ActionScript Error:" + err.message);
+			}
+		}
+		/* private function onHTTPResult(evt:ResultEvent):void{
+			trace("onHTTPResult:________________")
+			trace("result:" + evt.result)
+			trace("message:" + evt.message);
+			trace("headers:" + evt.headers);
+			trace("statusCode:" +evt.statusCode);
+			
+		}
+		private function onHTTPFault(evt:FaultEvent):void{
+			trace("onHTTPFault__________________");
+			
+			trace("fault:" + evt.fault);
+			trace("message:" + evt.message)
+			trace("headers:" + evt.headers);
+			trace("statusCode:" +evt.statusCode);
+		}
+		private function onHTTPInvoke(evt:InvokeEvent):void{
+			trace("onHTTPInvoke__________________");
+			trace("message:" + evt.message);
+			
+		}
+		private var http:HTTPService */
+			
+			
+			
+		
+		private var saveDataURLLoader:URLLoader;
+		private function onSaveDataProgress(evt:ProgressEvent):void{
+			var percent:Number = Math.floor(evt.bytesLoaded/evt.bytesTotal*100)
+			savingStatus.text = "STATUS: ODESÍLÁM NA SERVER  " + percent + "%";
+			trace("onSaveDataProgress:" + percent);
+			ExternalInterface.call("on_upload_progress", percent);
+		}
+		private function onSaveDataComplete(evt:Event):void{
+			onSaveDataDone();
+		}
+		private function onSaveDataSecurityError(evt:SecurityErrorEvent):void{
+			trace("onSaveDataSecurityError:" + evt.text);
+			onSaveDataError("Security error:" + evt.text);
+		}
+		
+		
+		private function onSaveDataIOError(evt:IOErrorEvent):void{
+			trace("IO ERROR: \n____________________________");
+			if (saveDataURLLoader.data){
+				trace("onSaveDataIOError saveDataURLLoader.data:" + ObjectUtil.toString(saveDataURLLoader.data));
+				trace("evttext:" + evt.text);
+				trace("bytesLoaded:" + saveDataURLLoader.bytesLoaded + "   bytesTotal:" + saveDataURLLoader.bytesTotal);
+				trace("dataformat:" + saveDataURLLoader.dataFormat);
+				trace("data:" + saveDataURLLoader.data);
+				onSaveDataError(saveDataURLLoader.data.toString());
+			}else{
+				trace("onSaveDataIOError:" + evt.text);
+				onSaveDataError("IO error:" + evt.text);
+			}
+		}
+		private function onSaveDataHTTPStatus(evt:HTTPStatusEvent):void{
+			trace("HTTP STATUS: \n____________________________");
+			trace("status:" + evt.status);
+			trace("target:" + evt.target);
+			trace("evt type:" + evt.type);
+			trace("data:" + saveDataURLLoader.data);
+		}
+		
+		
+		
+		//--------------------------------------
+		// JAVASCRIPT COMMUNICATION
+		//--------------------------------------
+		private function onSaveDataDone():void{
+			savingStatus.text = "STATUS: ODESLÁNO NA SERVER";
+			trace("onSaveDataDone saveDataURLLoader.data:" + saveDataURLLoader.data);
+			ExternalInterface.call("on_upload_success");
+		}
+		private function onSaveDataError(error:Object):void{
+			savingStatus.text = "STATUS: PŘI ODESÍLÁNÍ NASTALA CHYBA";
+			trace("onSaveDataError:" + error);
+			ExternalInterface.call("on_upload_error", error);
+		}
+		
+		
+		
+		
+		private function dontSaveData():void{
+			if (filename){
+				currentState = "photoSelected";
+			}else{
+				currentState = "";
+			}
+		}
+		
+		
+	]]>
+</mx:Script>
+	
+	
+<mx:states>
+	<mx:State name="photoSelected">
+		<mx:AddChild relativeTo="{hbox1}" position="lastChild">
+			<tools:PhotoStage id="photoStage" width="100" height="60" editable="false"/>
+		</mx:AddChild>
+		<mx:AddChild relativeTo="{hbox1}" position="lastChild">
+			<mx:Button label="editovat" click="editPhoto()" width="90" styleName="whiteButtons" buttonMode="true" useHandCursor="true"/>
+		</mx:AddChild>
+	</mx:State>
+	
+	
+	<mx:State name="editor">
+		<mx:AddChild position="lastChild">
+			<mx:HBox backgroundColor="#444444" width="100%" height="60" verticalAlign="middle" paddingLeft="20" paddingRight="10" horizontalGap="0">
+				<!--LOGO-->
+				<mx:Image source="@Embed(source='assets/assets.swf', symbol='logo')"/>
+				<mx:Spacer width="50" id="spacer2"/>
+				
+				
+				<mx:Spacer id="spacer1" width="50"/>
+				<mx:Button label="vybrat fotografii" click="choosePhoto()" id="button1" width="100%" height="40" buttonMode="true" useHandCursor="true"/>
+
+				<mx:Spacer width="100%"/>
+				<gui:BluredBox enabled="{!photoStage.toolController.isEditing}">
+					<mx:Button 
+						label="exit" click="exit()" buttonMode="true" useHandCursor="true"
+						width="32" height="32" styleName="toolButtons" icon="@Embed(source='assets/assets.swf', symbol='exitButton')"/>
+				</gui:BluredBox>	
+			</mx:HBox>
+		</mx:AddChild>
+		<mx:AddChild position="lastChild">
+			<mx:HBox id="bottomBox" width="100%" height="100%" horizontalGap="1">
+				<mx:Canvas backgroundColor="#444444" width="170" height="100%" horizontalScrollPolicy="off">
+					<gui:BluredBox enabled="{!photoStage.toolController.isEditing}" width="100%">
+					
+						<mx:Box backgroundColor="#333333" width="100%" borderColor="#4D4D4D" height="23" borderThickness="1" borderStyle="solid" borderSides="top bottom"
+							paddingLeft="10">
+							<mx:Label text="úpravy obrazu"/>
+						</mx:Box>
+					
+						<mx:Label text="otočení" y="34" x="10"/>
+						<mx:Button label="otočit vpravo" click="photoStage.toolController.rotateRight()" 
+							width="32" height="32" styleName="toolButtons" icon="@Embed(source='assets/assets.swf', symbol='rotateRightIcon')" x="130" y="30"
+							buttonMode="true" useHandCursor="true"/>
+						<mx:Button label="otočit vlevo" click="photoStage.toolController.rotateLeft()"
+							width="32" height="32" styleName="toolButtons" icon="@Embed(source='assets/assets.swf', symbol='rotateLeftIcon')" x="80" y="30"
+							buttonMode="true" useHandCursor="true"/>
+					
+						<mx:Label text="zrcadlení" y="72" x="10"/>
+						<mx:Button label="zrcadlit vertikálně" click="photoStage.toolController.flipVertical()" width="32" height="32" styleName="toolButtons"
+							icon="@Embed(source='assets/assets.swf', symbol='verticalMirrorIcon')" x="80" y="65"
+							buttonMode="true" useHandCursor="true"/>
+						<mx:Button label="zrcadlit horizontálně" click="photoStage.toolController.flipHorizontal()" width="32" height="32" styleName="toolButtons"
+							icon="@Embed(source='assets/assets.swf', symbol='horizontalMirrorIcon')" x="130" y="65"
+							buttonMode="true" useHandCursor="true"/>
+					</gui:BluredBox>
+					
+					<gui:BluredBox width="100%" y="105" enabled="{!photoStage.toolController.isFaceSelecting}">
+						<mx:Box width="100%" height="1" backgroundColor="#ffffff"/>
+						<mx:Box backgroundColor="#333333" width="100%" borderColor="#4D4D4D" height="23" borderThickness="1" borderStyle="solid" borderSides="top bottom" y="1" paddingLeft="10">
+							<mx:Label text="ořezání obrazu"/>
+						</mx:Box>
+						<mx:Label text="ořezání" y="35" x="10"/>
+						<mx:Button label="ořezat" click="photoStage.toolController.crop()" width="32" height="32" styleName="toolButtons"
+							icon="@Embed(source='assets/assets.swf', symbol='cropIcon')" x="80"
+							buttonMode="true" useHandCursor="true"
+							visible="{!photoStage.toolController.isCropping}" y="30"/>
+						
+						<mx:Button 
+							visible="{photoStage.toolController.isCropping}" click="photoStage.toolController.cropConfirm()" 
+							x="80" width="32" height="32"
+							buttonMode="true" useHandCursor="true" 
+							icon="@Embed(source='assets/assets.swf', symbol='confirmIcon')" styleName="toolButtons" y="30" label="ořezat"/>
+						<mx:Button  
+							visible="{photoStage.toolController.isCropping}" click="photoStage.toolController.cropCancel()" 
+							x="130" width="32" height="32" buttonMode="true" useHandCursor="true"
+							icon="@Embed(source='assets/assets.swf', symbol='cancelIcon')" styleName="toolButtons" y="30" label="zrušit ořezání"/>
+					</gui:BluredBox>
+					
+					
+					<gui:BluredBox y="175" enabled="{!photoStage.toolController.isCropping}" width="100%">
+						<mx:Box width="100%" height="1" backgroundColor="#ffffff"/>
+						<mx:Box backgroundColor="#333333" width="100%" borderColor="#4D4D4D" height="23" borderThickness="1" borderStyle="solid" borderSides="top bottom" y="1"
+							 paddingLeft="10">
+							<mx:Label text="důležitá část obrazu"/>
+						</mx:Box>
+						<mx:Label text="označit" x="10" y="33"/>
+						<mx:Button label="označit podstatnou část" width="32" height="32" styleName="toolButtons" x="80" y="28"
+							icon="@Embed(source='assets/assets.swf', symbol='faceSelectIcon')" click="photoStage.toolController.faceSelect()"
+							buttonMode="true" useHandCursor="true"
+							visible="{!photoStage.toolController.isFaceSelecting}"/>
+							
+						<mx:Button 
+							visible="{photoStage.toolController.isFaceSelecting}" click="photoStage.toolController.faceSelectConfirm()" 
+							x="80" width="32" height="32" buttonMode="true" useHandCursor="true" 
+							icon="@Embed(source='assets/assets.swf', symbol='confirmIcon')" styleName="toolButtons" y="30" label="ořezat"/>
+						<mx:Button  
+							visible="{photoStage.toolController.isFaceSelecting}" click="photoStage.toolController.faceSelectCancel()" 
+							x="130" width="32" height="32" buttonMode="true" useHandCursor="true"
+							icon="@Embed(source='assets/assets.swf', symbol='cancelIcon')" styleName="toolButtons" y="30" label="zrušit ořezání"/>
+					</gui:BluredBox>
+					
+					
+					
+					
+					<gui:BluredBox y="245" enabled="{!photoStage.toolController.isEditing}" width="100%">
+						<mx:Box width="100%" height="1" backgroundColor="#ffffff"/>
+						<mx:Box backgroundColor="#333333" width="100%" borderColor="#4D4D4D" height="23" borderThickness="1" borderStyle="solid" borderSides="top bottom" y="1"
+							paddingLeft="10">
+							<mx:Label text="úpravy obrazu"/>
+						</mx:Box>
+						
+						<!-- COLOR SETTING -->
+						<gui:ResetButton x="12" y="32" height="20" width="83"
+							enabled="{colorSlider.value!=0}"
+							label="sytost" toolTip="resetovat sytost" 
+							click="colorSlider.value=0;updateColorSetting();"
+							/>
+						<mx:HSlider 
+							id="colorSlider" x="5" y="46" width="160"
+							minimum="-100" maximum="100" snapInterval="1" thumbOffset="4" showDataTip="false"
+							value="{photoStage.toolController.color}" change="updateColorSetting()" 
+							/>
+						<mx:NumericStepper 
+							id="colorStepper" x="103" y="29" width="55" height="20" 
+							stepSize="1" minimum="-100" maximum="100" 
+							value="{photoStage.toolController.color}" change="updateColorSetting(event)"
+							/>
+						
+						<!-- CONTRAST SETTING -->
+						<gui:ResetButton x="12" y="92" height="20" width="83"
+							label="kontrast" toolTip="resetovat kontrast"
+							enabled="{contrastSlider.value!=0}" 
+							click="contrastSlider.value=0;updateColorSetting();"
+							/>
+						<mx:HSlider 
+							id="contrastSlider" x="5" y="107" width="160"
+							minimum="-100" maximum="100" snapInterval="1" thumbOffset="4" showDataTip="false"
+							value="{photoStage.toolController.contrast}" change="updateColorSetting()"
+							/>
+						<mx:NumericStepper 
+							id="contrastStepper" x="103" y="89" width="55" height="20"
+							stepSize="1" minimum="-100" maximum="100" 
+							value="{photoStage.toolController.contrast}" change="updateColorSetting(event)"
+							/>
+						
+						<!-- BRIGHTNESS SETTING -->
+						<gui:ResetButton x="12" y="152" height="20" width="83"
+							enabled="{brightnessSlider.value!=0}" 
+							label="světlost" toolTip="resetovat světlost" 
+							click="brightnessSlider.value=0;updateColorSetting();"
+							/>
+						<mx:HSlider 
+							id="brightnessSlider" x="5" y="165" width="160"
+							minimum="-100" maximum="100" snapInterval="1" thumbOffset="4" showDataTip="false"
+							value="{photoStage.toolController.brightness}" change="updateColorSetting()"
+							/>
+							
+						<mx:NumericStepper 
+							id="brightnessStepper" x="103" y="149" width="55" height="20"
+							stepSize="1" minimum="-100" maximum="100" 
+							value="{photoStage.toolController.brightness}" change="updateColorSetting(event)" 
+							/>
+						
+						<!-- COMPARING -->
+						
+						<mx:Canvas id="compareBox" width="150" height="30" x="10" y="211"
+							visible="false" backgroundImage="@Embed(source='assets/assets.swf', symbol='compareBox')" 
+							icon="@Embed(source='assets/assets.swf', symbol='compareBox')"
+							horizontalScrollPolicy="off" 
+							mouseChildren="false"
+							mouseMove="updateCompare()" mouseOut="hideCompare()"
+							showEffect="Fade" hideEffect="Fade">
+														
+							<mx:Label text="PŘED" color="#666666" fontWeight="bold" x="9" y="5"/>
+							<mx:Label text="PO" color="#666666" fontWeight="bold" x="119" y="5"/>
+						</mx:Canvas>
+					</gui:BluredBox>
+					
+					<!--
+					<gui:BluredBox y="495" enabled="{!photoStage.toolController.isEditing}" width="100%">
+						<mx:Button  x="10" y="28" width="102" 
+							label="cmyk -> rgb"  
+							click="photoStage.toolController.repairCMYK()"
+							buttonMode="true" useHandCursor="true"/>
+					</gui:BluredBox>
+					-->
+				</mx:Canvas>
+				<!--
+				PhotoStage will move here.
+				<tools:PhotoStage id="photoStage" width="100%" height="100%"/>
+				-->
+			</mx:HBox>
+		</mx:AddChild>
+		<mx:AddChild target="{photoStage}" relativeTo="{bottomBox}"/>
+		<mx:SetProperty target="{photoStage}" name="width" value="100%"/>
+		<mx:SetProperty target="{photoStage}" name="height" value="100%"/>
+		<mx:SetProperty target="{photoStage}" name="editable" value="true"/>
+		
+		
+		<mx:RemoveChild target="{button1}"/>
+		<mx:AddChild relativeTo="{spacer2}" position="after">
+			<gui:BluredBox enabled="{!photoStage.toolController.isEditing}">
+				<mx:Label text="vybrat jinou fotografii" click="choosePhoto()" y="4"/>
+				
+				<mx:Button label="zpět" x="130" click="undo()" enabled="{photoStage.toolController.isUndoStep}" buttonMode="{photoStage.toolController.isUndoStep}" useHandCursor="true"/>
+				<mx:Button label="znovu" x="205" click="redo()" enabled="{photoStage.toolController.isRedoStep}" buttonMode="{photoStage.toolController.isRedoStep}" useHandCursor="true"/>
+				
+				
+				<!--zoom-->
+				<mx:ComboBox id="zoomCombo" change="onZoomComboBoxChange()" rowCount="22" width="115" color="#000000" x="280">
+					<mx:dataProvider>
+						<mx:Object label="fit to screen" value="0"/>
+						<mx:Object label="200%" value="200"/>
+						<mx:Object label="150%" value="150"/>
+						<mx:Object label="100%" value="100"/>
+						<mx:Object label="50%" value="50"/>
+						<mx:Object label="25%" value="25"/>
+					</mx:dataProvider>
+				</mx:ComboBox>
+				<mx:Label text="{filename}" y="3" x="410"/>
+			</gui:BluredBox>
+		</mx:AddChild>
+		
+		
+		<mx:RemoveChild target="{spacer1}"/>
+		<mx:RemoveChild target="{hbox1}"/>
+	</mx:State>
+	<mx:State name="saveData">
+		<mx:RemoveChild target="{button2}"/>
+		<mx:AddChild relativeTo="{hbox1}" position="lastChild">
+			<mx:HBox>
+				<mx:Label text="JSTE SI OPRAVDU JISTI, ŽE CHCETE DATA ULOŽIT?" color="#AE0303" fontSize="20" fontWeight="bold"/>
+				<mx:Button label="ANO" width="70" themeColor="#CF0202" click="saveDataNow()"/>
+				<mx:Button label="NE" width="70" click="dontSaveData()"/>
+			</mx:HBox>
+		</mx:AddChild>
+	</mx:State>
+	<mx:State name="savingData">
+		<mx:RemoveChild target="{button2}"/>
+		<mx:AddChild relativeTo="{hbox1}" position="lastChild">
+			<mx:Label id="savingStatus" fontSize="15" color="#000000" fontWeight="bold" text="STATUS: KONVERTUJI FOTOGRAFII"/>
+		</mx:AddChild>
+	</mx:State>
+	
+	
+</mx:states>
+	
+	
+	
+	
+<mx:HBox width="100%" height="60" verticalAlign="middle" paddingLeft="20" id="hbox1">
+	<mx:Button label="vybrat fotografii" click="choosePhoto()" width="140" styleName="whiteButtons" buttonMode="true" useHandCursor="true" id="button2"/>
+</mx:HBox>
+</mx:Application>

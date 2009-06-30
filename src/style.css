@@ -1,0 +1,80 @@
+/* CSS file */
+@font-face {
+	src: url(assets/fonts.swf);
+	fontFamily: "Myriad Pro";
+	fontStyle: normal;
+	fontWeight: normal;
+}
+
+@font-face {
+	src: url(assets/fonts.swf);
+	fontFamily: "Myriad Pro";
+	fontStyle: normal;
+	fontWeight: bold;
+}
+global{
+	font-family: "Myriad Pro";
+	font-size: 13;
+	color: #ffffff;
+}
+Application{
+	padding-bottom: 0;
+	padding-left: 0;
+	padding-right: 0;
+	padding-top: 0;
+	
+	backgroundGradientColors: #ffffff, #ffffff;
+	backgroundColor: #ffffff;
+	
+	/*modalTransparency: 0.5;0.5*/
+	/*modalTransparencyBlur: 8;/*3*/
+	modalTransparencyColor: #000000;/*#FFFFFF*/
+	/*modalTransparencyDuration: 500; 100*/
+}
+ToolTip{
+	font-family: "Myriad Pro";
+	font-size: 11;
+	background-color: #ffffff; 
+	color: #000000;
+}
+NumericStepper{
+	color: #000000;
+}
+
+HSlider{
+	track-skin:				ClassReference("com.centrumholdings.photouploader.gui.TrackSkinHSlider");
+	/**/
+	track-highlight-skin: 	ClassReference("com.centrumholdings.photouploader.gui.HighlightTrackSkinHSlider");
+	/**/
+	show-track-highlight: 	true;
+	thumb-skin: 			ClassReference("com.centrumholdings.photouploader.gui.ThumbSkinHSlider");
+}
+Button{
+	font-weight: normal;
+	color: #000000;
+}
+Button.whiteButtons{
+	font-weight: normal;
+	color: #000000;
+}
+Button.toolButtons{
+	up-skin: 	Embed(source="assets/assets.swf", symbol="toolUpButton");
+	over-skin: 	Embed(source="assets/assets.swf", symbol="toolOverButton");
+	down-skin: 	Embed(source="assets/assets.swf", symbol="toolDownButton");
+}
+Button.invisible{
+	color: #FFFFFF;
+	text-roll-over-color: #FFFFFF;
+	text-selected-color: #FFFFFF;
+	disabled-color: #FFFFFF;
+	font-weight: normal;
+	text-align: left;
+	padding-left: 0;
+	padding-top: 0;
+	padding-bottom: 0;
+	icon: 		Embed(source="assets/assets.swf", symbol="resetButton");
+	up-skin: 	Embed(source="assets/assets.swf", symbol="invisibleButton");
+	over-skin: 	Embed(source="assets/assets.swf", symbol="invisibleButton");
+	down-skin: 	Embed(source="assets/assets.swf", symbol="invisibleButton");
+	disabled-skin: 	Embed(source="assets/assets.swf", symbol="invisibleButton");
+}
